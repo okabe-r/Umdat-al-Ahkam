@@ -22,6 +22,7 @@
     --danger: #e74c3c;
     --danger-dark: #c0392b;
     --info: #3498db;
+    --info-dark: #2980b9;
     --card-bg: #ffffff;
     --card-border: #e0e0e0;
     --card-front-bg: #e8f5e9;
@@ -566,6 +567,256 @@ const TranscriptionModal = ({ cardData, onClose }) => {
     );
 };
 
+const MemorizationTestModal = ({ allHadiths, onClose }) => {
+    const [step, setStep] = useState('inputStartId'); // 'inputStartId', 'enterKitabName', 'enterBabName', 'testHadith'
+    const [startIdInput, setStartIdInput] = useState('');
+    const [currentHadithId, setCurrentHadithId] = useState(null);
+    const [userInput, setUserInput] = useState('');
+    const [comparison, setComparison] = useState(null);
+    const [history, setHistory] = useState([]);
+    const modalRef = useRef(null);
+
+    const currentHadith = useMemo(() => {
+        if (!currentHadithId) return null;
+        return allHadiths.find(h => h.id === currentHadithId);
+    }, [currentHadithId, allHadiths]);
+
+    const babsForCurrentBook = useMemo(() => {
+        if (!currentHadith) return [];
+        const hadithsOfBook = allHadiths.filter(h => h.book === currentHadith.book);
+        const babs = [];
+        const seenBabs = new Set();
+        for (const hadith of hadithsOfBook) {
+            if (!seenBabs.has(hadith.bab)) {
+                babs.push(hadith.bab);
+                seenBabs.add(hadith.bab);
+            }
+        }
+        return babs;
+    }, [currentHadith, allHadiths]);
+
+
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        document.body.style.overflow = 'hidden';
+        if (modalRef.current) {
+            modalRef.current.focus();
+        }
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            document.body.style.overflow = 'auto';
+        };
+    }, [onClose]);
+
+    const handleStartTest = (e) => {
+        e.preventDefault();
+        const id = parseInt(startIdInput, 10);
+        const hadithExists = allHadiths.some(h => h.id === id);
+        if (id > 0 && hadithExists) {
+            setHistory([]);
+            setCurrentHadithId(id);
+            setStep('enterKitabName');
+            setUserInput('');
+            setComparison(null);
+        } else {
+            alert('الرجاء إدخال رقم حديث صحيح.');
+        }
+    };
+
+    const handleBack = () => {
+        if (history.length === 0) {
+            setStep('inputStartId');
+            setCurrentHadithId(null);
+            setStartIdInput('');
+            setUserInput('');
+            setComparison(null);
+            return;
+        }
+
+        const prevState = history[history.length - 1];
+        const newHistory = history.slice(0, -1);
+
+        setStep(prevState.step);
+        setCurrentHadithId(prevState.currentHadithId);
+        setHistory(newHistory);
+        setUserInput('');
+        setComparison(null);
+    };
+
+
+    const handleCorrection = () => {
+        let originalText;
+        if (step === 'enterKitabName') {
+            originalText = currentHadith.book;
+        } else if (step === 'enterBabName') {
+            originalText = currentHadith.bab;
+        } else if (step === 'testHadith') {
+            originalText = currentHadith.text;
+        }
+
+        if(originalText) {
+            const diffResult = diffWords(originalText, userInput);
+            setComparison(diffResult);
+        }
+    };
+
+    const handleTryAgain = () => {
+        setUserInput('');
+        setComparison(null);
+    };
+
+    const handleNext = () => {
+        setHistory([...history, { step, currentHadithId }]);
+        setUserInput('');
+        setComparison(null);
+
+        if (step === 'enterKitabName') {
+            if (babsForCurrentBook.length > 1) {
+                setStep('enterBabName');
+            } else {
+                setStep('testHadith');
+            }
+            return;
+        }
+
+        if (step === 'enterBabName') {
+            setStep('testHadith');
+            return;
+        }
+
+        if (step === 'testHadith') {
+            const nextHadith = allHadiths.find(h => h.id > currentHadithId);
+            if (nextHadith) {
+                setCurrentHadithId(nextHadith.id);
+                if (nextHadith.book !== currentHadith.book) {
+                    setStep('enterKitabName');
+                } else if (nextHadith.bab !== currentHadith.bab) {
+                    setStep('enterBabName');
+                } else {
+                    setStep('testHadith');
+                }
+            } else {
+                alert('أحسنت! لقد أكملت الاختبار.');
+                onClose();
+            }
+        }
+    };
+
+    const renderComparison = (diff, type) => {
+        if (!diff) return null;
+        return diff.map((part, index) => {
+            if (type === 'user' && part.type === 'missing') return null;
+            if (type === 'original' && part.type === 'added') return null;
+            const className = `diff-${part.type}`;
+            return React.createElement('span', { key: index, className: className }, part.value + ' ');
+        });
+    };
+
+    const getNextButtonText = () => {
+        if (step === 'enterKitabName') return babsForCurrentBook.length > 1 ? 'الباب التالي' : 'الحديث التالي';
+        if (step === 'enterBabName') return 'الحديث التالي';
+        if (step === 'testHadith' && currentHadith) {
+            const nextHadith = allHadiths.find(h => h.id > currentHadithId);
+            if (!nextHadith) return "إنهاء الاختبار";
+            if (nextHadith.book !== currentHadith.book) return 'الكتاب التالي';
+            if (nextHadith.bab !== currentHadith.bab) return 'الباب التالي';
+            return 'الحديث التالي';
+        }
+        return '';
+    };
+
+    const renderContent = () => {
+        if (step === 'inputStartId') {
+            return React.createElement(React.Fragment, null,
+                React.createElement('h3', null, 'اختبار الحفظ'),
+                React.createElement('form', { onSubmit: handleStartTest },
+                    React.createElement('label', { htmlFor: 'start-hadith-id', style: { display: 'block', marginBottom: '10px' } }, 'ادخل رقم الحديث الذي تريد أن تبدأ منه:'),
+                    React.createElement('input', {
+                        type: 'number',
+                        id: 'start-hadith-id',
+                        value: startIdInput,
+                        onChange: e => setStartIdInput(e.target.value),
+                        style: { width: '100%', padding: '10px', fontSize: '1.1em', marginBottom: '20px', textAlign: 'center' },
+                        autoFocus: true
+                    }),
+                    React.createElement('div', { className: 'modal-actions' },
+                        React.createElement('button', { type: 'submit', className: 'section-button' }, 'بدء الاختبار')
+                    )
+                )
+            );
+        }
+
+        if (currentHadith && (step === 'enterKitabName' || step === 'enterBabName' || step === 'testHadith')) {
+            let title, placeholder, reference, originalText;
+            if (step === 'enterKitabName') {
+                title = 'اكتب اسم الكتاب';
+                placeholder = 'اكتب اسم الكتاب هنا...';
+                reference = `حديث رقم ${toArabicNumerals(currentHadith.id)}`;
+                originalText = currentHadith.book;
+            } else if (step === 'enterBabName') {
+                title = 'اكتب اسم الباب';
+                placeholder = 'اكتب اسم الباب هنا...';
+                reference = `${currentHadith.book} - حديث رقم ${toArabicNumerals(currentHadith.id)}`;
+                originalText = currentHadith.bab;
+            } else { // testHadith
+                title = 'اكتب الحديث';
+                placeholder = 'اكتب الحديث هنا...';
+                reference = `${currentHadith.book} - ${currentHadith.bab}`;
+                originalText = currentHadith.text;
+            }
+
+            return React.createElement(React.Fragment, null,
+                React.createElement('h3', null, title),
+                React.createElement('p', { className: 'bab-reference' }, reference),
+                step === 'testHadith' && React.createElement('div', { className: 'card-face card-front', style: { position: 'relative', width: 'auto', height: 'auto', margin: '0 auto 20px', maxWidth: '320px', cursor: 'default' } },
+                    React.createElement('div', { className: 'bab-name-wrapper' },
+                        React.createElement('span', { className: "bab-name", title: "الراوي" }, currentHadith.sahabi && Array.isArray(currentHadith.sahabi) ? currentHadith.sahabi.join('، ') : 'راوٍ غير معروف')
+                    )
+                ),
+                !comparison ? (
+                    React.createElement(React.Fragment, null,
+                        React.createElement('textarea', {
+                            value: userInput,
+                            onChange: e => setUserInput(e.target.value),
+                            placeholder: placeholder,
+                            'aria-label': title,
+                            style: {minHeight: step === 'testHadith' ? '250px' : '150px' }
+                        }),
+                        React.createElement('div', { className: 'modal-actions' },
+                             React.createElement('button', { className: 'back-button', onClick: handleBack }, 'عودة'),
+                            React.createElement('button', { className: 'section-button', onClick: handleCorrection }, 'تصحيح الإجابة')
+                        )
+                    )
+                ) : (
+                    React.createElement('div', { className: 'comparison-view' },
+                        React.createElement('h4', null, 'إجابتك'),
+                        React.createElement('p', null, renderComparison(comparison, 'user')),
+                        React.createElement('h4', null, step === 'testHadith' ? 'الإجابة الصحيحة (بدون حركات)' : 'الإجابة الصحيحة'),
+                        React.createElement('p', null, renderComparison(comparison, 'original')),
+                        React.createElement('div', { className: 'modal-actions' },
+                            React.createElement('button', { className: 'section-button', onClick: handleTryAgain }, 'حاول مرة أخرى'),
+                            React.createElement('button', { className: 'section-button', style: {backgroundColor: 'var(--primary)'}, onClick: handleNext }, getNextButtonText())
+                        )
+                    )
+                )
+            );
+        }
+        return null;
+    };
+
+    return React.createElement('div', { className: 'modal-overlay', onClick: onClose },
+        React.createElement('div', { className: 'modal-content', onClick: e => e.stopPropagation(), ref: modalRef, tabIndex: -1, role: 'dialog', 'aria-modal': true },
+            React.createElement('button', { className: 'modal-close-button', onClick: onClose, 'aria-label': 'إغلاق' }, '×'),
+            renderContent()
+        )
+    );
+};
+
 
 const processHadithsData = (hadiths) => {
     const babCounts = hadiths.reduce((acc, h) => {
@@ -594,7 +845,7 @@ const HadithCard = ({ cardData }) => {
     const [isFlipped, setIsFlipped] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const toggleFlip = () => setIsFlipped(!isFlipped);
-    const createMarkup = (htmlString) => ({ __html: htmlString });
+    const createMarkup = (rawString) => ({ __html: rawString.replace(/\n/g, '<br />') });
 
     const openModal = (e) => {
         e.stopPropagation();
@@ -634,6 +885,7 @@ const App = () => {
     const [view, setView] = useState('book-selection');
     const [currentBookName, setCurrentBookName] = useState(null);
     const [currentBab, setCurrentBab] = useState(null);
+    const [isTestMode, setIsTestMode] = useState(false);
 
     useEffect(() => {
         fetch('./hadiths.json')
@@ -648,7 +900,7 @@ const App = () => {
                     id: parseInt(id, 10),
                     book: hadithData.book,
                     bab: hadithData.section,
-                    text: hadithData.text.replace(/\n/g, '<br />'),
+                    text: hadithData.text,
                     sahabi: hadithData.sahabi
                 }));
                 setAllHadiths(hadithArray);
@@ -819,8 +1071,18 @@ const App = () => {
         React.createElement('header', null,
             React.createElement('h1', null, "عمدة الأحكام")
         ),
+        isTestMode && React.createElement(MemorizationTestModal, {
+            allHadiths: allHadiths,
+            onClose: () => setIsTestMode(false)
+        }),
         React.createElement('main', { id: "content-area" },
             view === 'book-selection' && React.createElement('div', { className: "view active-view" },
+                React.createElement('button', {
+                    key: 'test-button',
+                    className: "section-button", 
+                    onClick: () => setIsTestMode(true),
+                    style: { backgroundColor: 'var(--info)', marginBottom: '25px', width: '100%' }
+                }, "اختبار الحفظ"),
                 React.createElement('h2', null, "اختر كتابًا"),
                 React.createElement('div', { id: "section-buttons-container" },
                     uniqueBooks.map(book =>
